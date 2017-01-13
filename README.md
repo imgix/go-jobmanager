@@ -1,4 +1,6 @@
 # go-jobmanager
+[![GODOC](https://godoc.org/github.com/imgix/go-jobmanager?status.svg)](http://godoc.org/github.com/imgix/go-gojobmanager)
+
 
 - run a subprocess pool
 - configure min and max subprocesses, this library will grow the pool as jobs are needed
