@@ -8,8 +8,9 @@ jobmanager's are goroutine safe, individual jobs returned by `Reserve()` are not
 
 ## example
 
-the jobmanager needs a `Runner` passed in ```golang
+the jobmanager needs a `Runner` passed in 
 
+```golang
 type cmdTester struct {
 	path string
 	args []string
