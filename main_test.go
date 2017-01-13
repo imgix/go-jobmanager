@@ -46,7 +46,7 @@ func counterToFloat(counter *prometheus.CounterVec, l prometheus.Labels) (float6
 var bookeepIntervalMs = time.Millisecond * 500
 
 func basicSetup(t *testing.T, bin string, args []string,
-	min, max int64, maxrss uint64) *jobmanager {
+	min, max int64, maxrss uint64) *Jobmanager {
 
 	if !filepath.IsAbs(bin) {
 		var err error
@@ -73,7 +73,7 @@ func basicSetup(t *testing.T, bin string, args []string,
 }
 
 func leveeSetup(t *testing.T, script string, args []string,
-	min, max int64, maxrss uint64) *jobmanager {
+	min, max int64, maxrss uint64) *Jobmanager {
 	if levee, err := exec.LookPath("levee"); err != nil {
 		t.Fatal(err)
 	} else {
@@ -83,7 +83,7 @@ func leveeSetup(t *testing.T, script string, args []string,
 		}
 		return basicSetup(t, levee, newArgs, min, max, maxrss)
 	}
-	t.Fatalf("[BUG] no jobmanager")
+	t.Fatalf("[BUG] no Jobmanager")
 	return nil
 
 }

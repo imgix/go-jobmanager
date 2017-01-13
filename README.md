@@ -6,7 +6,7 @@
 - configure min and max subprocesses, this library will grow the pool as jobs are needed
 - configure maximum RSS, this lib will rotate jobs who's processes exceeds the RSS
 
-jobmanager's are goroutine safe, individual jobs returned by `Reserve()` are not.
+Jobmanager's are goroutine safe, individual jobs returned by `Reserve()` are not.
 
 ## example
 

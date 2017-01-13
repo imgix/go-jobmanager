@@ -14,7 +14,7 @@ type Runner interface {
 	Run(uint64) *exec.Cmd
 }
 
-type jobmanager struct {
+type Jobmanager struct {
 	minjobs, maxjobs, currentjobs int64
 	maxrss                        uint64
 	blockedjobs                   int32
@@ -34,11 +34,11 @@ type jobmanager struct {
 }
 
 func NewJobManager(run Runner, namespace, subsystem, jobname string,
-	min, max int64, maxrss uint64) *jobmanager {
+	min, max int64, maxrss uint64) *Jobmanager {
 	if subsystem == "" {
-		subsystem = "jobmanager"
+		subsystem = "Jobmanager"
 	}
-	return &jobmanager{
+	return &Jobmanager{
 		minjobs:    min,
 		maxjobs:    max,
 		maxrss:     maxrss,
@@ -108,7 +108,7 @@ func NewJobManager(run Runner, namespace, subsystem, jobname string,
 	}
 }
 
-func (jb *jobmanager) Metrics() []prometheus.Collector {
+func (jb *Jobmanager) Metrics() []prometheus.Collector {
 
 	return []prometheus.Collector{
 		jb.runningChildren,
@@ -118,11 +118,11 @@ func (jb *jobmanager) Metrics() []prometheus.Collector {
 	}
 }
 
-func (jb *jobmanager) reserve() *job {
+func (jb *Jobmanager) reserve() *job {
 
 	return <-jb.allocC
 }
-func (jb *jobmanager) Reserve() *job {
+func (jb *Jobmanager) Reserve() *job {
 	timer := prometheus.NewTimer(
 		prometheus.ObserverFunc(func(v float64) {
 			jb.reserveTimer.WithLabelValues("reserve").Observe(v)
@@ -133,11 +133,11 @@ func (jb *jobmanager) Reserve() *job {
 	return jb.reserve()
 }
 
-func (jb *jobmanager) Release(j *job) {
+func (jb *Jobmanager) Release(j *job) {
 	jb.releaseC <- j
 }
 
-func (jb *jobmanager) run(bookinterval time.Duration) {
+func (jb *Jobmanager) run(bookinterval time.Duration) {
 	defer close(jb.doneC)
 	running := true
 
@@ -381,13 +381,13 @@ func (jb *jobmanager) run(bookinterval time.Duration) {
 	}
 }
 
-func (jb *jobmanager) Run(bookinterval time.Duration) {
+func (jb *Jobmanager) Run(bookinterval time.Duration) {
 	jb.initWg.Add(1)
 	go jb.run(bookinterval)
 	jb.initWg.Wait()
 }
 
-func (jb *jobmanager) Stop() {
+func (jb *Jobmanager) Stop() {
 	close(jb.runningC)
 	<-jb.doneC
 }
