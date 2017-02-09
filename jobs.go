@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 
 	prefmsg "github.com/davidbirdsong/go-prefixbytes"
@@ -54,10 +55,16 @@ func (j *job) Communicate(b []byte) ([]byte, func(), error) {
 func (j *job) communicate(b []byte) ([]byte, func(), error) {
 
 	if _, err := j.stdin.Write(b); err != nil {
+		switch err {
+		case io.EOF, io.ErrUnexpectedEOF, syscall.EPIPE:
+			j.running = false
+		}
+
 		return nil, nil, err
 	}
 	if bstream, err := j.stdout.ReadMsg(); err != nil {
-		if err == io.EOF {
+		switch err {
+		case io.EOF, io.ErrUnexpectedEOF, syscall.EPIPE:
 			j.running = false
 		}
 		return nil, nil, err
