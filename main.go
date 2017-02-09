@@ -360,6 +360,10 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 		case jb.allocC <- allocJ:
 			allocJ.start = time.Now()
 			allocJ.useCount++
+			if allocJ.useCount > 1 {
+				jb.jobactions.WithLabelValues("reuse").Add(1)
+			}
+
 			jobmapReserved[allocJ.id] = allocJ
 
 		case <-bookkeepC:
