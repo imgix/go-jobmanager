@@ -176,7 +176,6 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 			if p, err := process.NewProcess(j.id); err != nil {
 				continue
 			} else {
-				jb.jobactions.WithLabelValues("new_job").Add(1)
 				procs = append(procs, p)
 			}
 
@@ -323,6 +322,7 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 
 			if _, ok := jobmapReserved[allocJ.id]; !ok {
 				retJ.stop(false)
+				jb.jobactions.WithLabelValues("untracked_return").Add(1)
 
 				jb.currentjobs--
 				procsMutex.Lock()
@@ -360,7 +360,8 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 		case jb.allocC <- allocJ:
 			allocJ.start = time.Now()
 			allocJ.useCount++
-			if allocJ.useCount > 1 {
+			allocJ.totCount++
+			if allocJ.totCount > 1 {
 				jb.jobactions.WithLabelValues("reuse").Add(1)
 			}
 
