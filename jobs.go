@@ -14,17 +14,17 @@ import (
 )
 
 type job struct {
-	useCount int64
-	rss      uint64
-	id       int32
-	start    time.Time
-	cmd      *exec.Cmd
-	proc     *process.Process
-	stdin    io.Writer
-	stderr   io.ReadCloser
-	stdout   msgio.Reader
-	running  bool
-	runtime  *prometheus.HistogramVec
+	useCount, totCount int64
+	rss                uint64
+	id                 int32
+	start              time.Time
+	cmd                *exec.Cmd
+	proc               *process.Process
+	stdin              io.Writer
+	stderr             io.ReadCloser
+	stdout             msgio.Reader
+	running            bool
+	runtime            *prometheus.HistogramVec
 }
 
 func (j *job) age() time.Duration {
