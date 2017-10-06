@@ -54,13 +54,16 @@ func (j *job) Communicate(b []byte) ([]byte, func(), error) {
 }
 func (j *job) communicate(b []byte) ([]byte, func(), error) {
 
-	if _, err := j.stdin.Write(b); err != nil {
-		switch err {
-		case io.EOF, io.ErrUnexpectedEOF, syscall.EPIPE:
-			j.running = false
-		}
+	// handle case where empty writes are desired
+	if b != nil && len(b) > 0 {
+		if _, err := j.stdin.Write(b); err != nil {
+			switch err {
+			case io.EOF, io.ErrUnexpectedEOF, syscall.EPIPE:
+				j.running = false
+			}
 
-		return nil, nil, err
+			return nil, nil, err
+		}
 	}
 	if bstream, err := j.stdout.ReadMsg(); err != nil {
 		switch err {
