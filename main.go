@@ -14,6 +14,10 @@ type Runner interface {
 	Run(uint64) *exec.Cmd
 }
 
+type Initializer interface {
+	Init(uint64) error
+}
+
 type Jobmanager struct {
 	minjobs, maxjobs, currentjobs int64
 	maxrss                        uint64
@@ -34,11 +38,12 @@ type Jobmanager struct {
 }
 
 func NewJobManager(run Runner, namespace, subsystem, jobname string,
-	min, max int64, maxrss uint64) *Jobmanager {
+	min, max int64, maxrss uint64) (*Jobmanager, error) {
 	if subsystem == "" {
 		subsystem = "Jobmanager"
 	}
-	return &Jobmanager{
+
+	jb := &Jobmanager{
 		minjobs:    min,
 		maxjobs:    max,
 		maxrss:     maxrss,
@@ -106,6 +111,14 @@ func NewJobManager(run Runner, namespace, subsystem, jobname string,
 			[]string{"phase"},
 		),
 	}
+
+	if j, err := newjob(0, jb.runner, jb.runTimer); err != nil {
+		return nil, err
+	} else {
+		j.stop(true)
+	}
+	return jb, nil
+
 }
 
 func (jb *Jobmanager) Metrics() []prometheus.Collector {
@@ -148,10 +161,11 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 		cmdMap         = make(map[int32]*job)
 		procsMutex     = &sync.Mutex{}
 		pidRss         = make(map[int32]uint64)
+		jobID          = uint64(1)
 	)
 
 	for int64(len(jobpoolFree)) != jb.minjobs {
-		if j, err := newjob(0, jb.runner, jb.runTimer); err != nil {
+		if j, err := newjob(jobID, jb.runner, jb.runTimer); err != nil {
 			jb.logger([]byte(err.Error()))
 			time.Sleep(time.Millisecond * 200)
 			continue
@@ -160,6 +174,7 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 			jb.jobactions.WithLabelValues("new_job").Add(1)
 			jobpoolFree = append(jobpoolFree, j)
 		}
+		jobID++
 
 	}
 	type pidRSS struct {
@@ -278,10 +293,12 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 				}
 
 			}
-			if jsub, err = newjob(0, jb.runner, jb.runTimer); err != nil {
+			if jsub, err = newjob(jobID, jb.runner, jb.runTimer); err != nil {
 				jb.jobactions.WithLabelValues("job_create_err").Add(1)
+				jobID++
 				return nil, err
 			}
+			jobID++
 
 			jb.jobactions.WithLabelValues("new_job").Add(1)
 			pidRss[jsub.id] = 0

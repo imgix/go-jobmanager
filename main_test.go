@@ -55,7 +55,7 @@ func basicSetup(t *testing.T, bin string, args []string,
 		}
 	}
 
-	jb := NewJobManager(
+	jb, err := NewJobManager(
 		&cmdTester{
 			path: bin,
 			args: args,
@@ -67,6 +67,11 @@ func basicSetup(t *testing.T, bin string, args []string,
 		min, max, // 1 min proc, 10 maxprocs
 		maxrss, //52 MB
 	)
+	if err != nil {
+		t.Fatal(err)
+		return jb
+
+	}
 
 	jb.Run(bookeepIntervalMs)
 	return jb
@@ -158,7 +163,7 @@ func TestKillSlowJob(t *testing.T) {
 	}
 	bookeepinterval_ms := time.Duration(500)
 
-	jb := NewJobManager(
+	jb, err := NewJobManager(
 		&cmdTester{
 			path: bin,
 			args: []string{
@@ -175,6 +180,9 @@ func TestKillSlowJob(t *testing.T) {
 		1, 1, // 1 min proc, 10 maxprocs
 		1024*1024*600, //52 MB
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	jb.Run(time.Millisecond * bookeepinterval_ms)
 	j := jb.Reserve()
@@ -199,7 +207,7 @@ func TestRSSKill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	jb := NewJobManager(
+	jb, err := NewJobManager(
 		&cmdTester{
 			path: bin,
 			args: []string{
@@ -215,6 +223,9 @@ func TestRSSKill(t *testing.T) {
 		30, 40, // 1 min proc, 10 maxprocs
 		1024*1024*6, //52 MB
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if jb == nil {
 		t.Fatal("no job manager")
 	}
