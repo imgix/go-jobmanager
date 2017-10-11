@@ -99,7 +99,7 @@ func newjob(jobid uint64, run Runner, v *prometheus.HistogramVec) (*job, error) 
 
 	j.id = int32(j.cmd.Process.Pid)
 	if jinit, ok := run.(Initializer); ok {
-		if err := jinit.Init(jobid); err != nil {
+		if err := jinit.Init(jobid, j); err != nil {
 			j.stop(true)
 			j.running = false
 			return nil, err

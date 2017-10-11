@@ -15,7 +15,10 @@ type Runner interface {
 }
 
 type Initializer interface {
-	Init(uint64) error
+	Init(uint64, Communicator) error
+}
+type Communicator interface {
+	Communicate([]byte) ([]byte, func(), error)
 }
 
 type Jobmanager struct {
