@@ -1,6 +1,7 @@
 package jobmanager
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -57,18 +58,30 @@ func (j *job) communicate(b []byte) ([]byte, func(), error) {
 	// handle case where empty writes are desired
 	if b != nil && len(b) > 0 {
 		if _, err := j.stdin.Write(b); err != nil {
+
+			if e, ok := err.(*os.PathError); ok {
+				if e.Op == "write" {
+					j.running = false
+					return nil, nil, err
+				}
+			}
+
 			switch err {
 			case io.EOF, io.ErrUnexpectedEOF, syscall.EPIPE:
 				j.running = false
+			default:
+				os.Stderr.Write([]byte(fmt.Sprintf("[jobmanager] uncaught err on Write to job Stdin, err=[%#v]\n", err)))
 			}
 
-			return nil, nil, err
 		}
 	}
 	if bstream, err := j.stdout.ReadMsg(); err != nil {
 		switch err {
 		case io.EOF, io.ErrUnexpectedEOF, syscall.EPIPE:
 			j.running = false
+
+		default:
+			os.Stderr.Write([]byte(fmt.Sprintf("[jobmanager] uncaught err on Read of job Stdout, err=[%#vs]\n", err)))
 		}
 		return nil, nil, err
 	} else {
