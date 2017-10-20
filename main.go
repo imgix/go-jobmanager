@@ -227,10 +227,10 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 		}
 	}()
 
-	bookkeep := func() []*job {
+	bookkeep := func(t time.Time) []*job {
 		var tmp []*job
 		for i, j := range jobpoolFree {
-			if j.useCount < 2 {
+			if j.start.Add(time.Second * 10).Before(t) {
 				j.stop(true)
 				jb.jobactions.WithLabelValues("reap_idle").Add(1)
 				delete(pidRss, j.id)
@@ -275,7 +275,7 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 
 	}
 
-	releaseJob := func(j *job) *job {
+	releaseJob := func(j *job, t time.Time) *job {
 		delete(jobmapReserved, j.id)
 		if j.Recycle {
 			jb.jobactions.WithLabelValues("recycle").Add(1)
@@ -297,22 +297,24 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 			return nil
 
 		}
+		j.start = t
 		return j
 	}
 
 	jb.initWg.Done()
 	bookkeepC := time.Tick(bookinterval)
+	var now time.Time
 	for running {
 		if len(jobpoolFree) == 0 {
 			if currentjobs() >= jb.maxjobs {
 				jb.jobactions.WithLabelValues("wait_maxjobs").Add(1)
 				select {
 				case j := <-jb.releaseC:
-					if j = releaseJob(j); j != nil {
+					if j = releaseJob(j, now); j != nil {
 						jobpoolFree = append(jobpoolFree, j)
 					}
 				case <-bookkeepC:
-					jobpoolFree = bookkeep()
+					jobpoolFree = bookkeep(now)
 
 				}
 				continue
@@ -339,7 +341,7 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 		case _, running = <-jb.runningC:
 
 		case j := <-jb.releaseC:
-			if j = releaseJob(j); j != nil {
+			if j = releaseJob(j, now); j != nil {
 				jobpoolFree = append(jobpoolFree, j)
 			}
 
@@ -358,8 +360,8 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 			}
 			jobmapReserved[j.id] = j
 
-		case <-bookkeepC:
-			jobpoolFree = bookkeep()
+		case now = <-bookkeepC:
+			jobpoolFree = bookkeep(now)
 			// current includes the one ready for alloc
 			jb.runningChildren.Set(float64(currentjobs()))
 		}
