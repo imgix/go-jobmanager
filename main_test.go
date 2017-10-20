@@ -191,7 +191,7 @@ func TestKillSlowJob(t *testing.T) {
 	}
 
 	if _, _, err := j.Communicate([]byte("comms!!!!\n")); err != io.EOF {
-		t.Fatalf("job should have timed out, caused error")
+		t.Fatalf("job should have timed out, caused error: %v", err)
 	}
 	time.Sleep(3 * time.Second)
 	if f, err := counterToFloat(jb.jobactions,

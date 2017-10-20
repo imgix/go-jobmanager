@@ -22,10 +22,10 @@ type Communicator interface {
 }
 
 type Jobmanager struct {
-	minjobs, maxjobs, currentjobs int64
-	maxrss                        uint64
-	blockedjobs                   int32
-	jobTimeout                    time.Duration
+	minjobs, maxjobs int64
+	maxrss           uint64
+	blockedjobs      int32
+	jobTimeout       time.Duration
 
 	logger          func([]byte)
 	runner          Runner
@@ -158,7 +158,6 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 	running := true
 
 	var (
-		err            error
 		jobpoolFree    []*job
 		jobmapReserved = make(map[int32]*job)
 		cmdMap         = make(map[int32]*job)
@@ -166,6 +165,13 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 		pidRss         = make(map[int32]uint64)
 		jobID          = uint64(1)
 	)
+	currentjobs := func() int64 {
+		i := len(jobpoolFree)
+		for range jobmapReserved {
+			i++
+		}
+		return int64(i)
+	}
 
 	for int64(len(jobpoolFree)) != jb.minjobs {
 		if j, err := newjob(jobID, jb.runner, jb.runTimer); err != nil {
@@ -173,7 +179,6 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 			time.Sleep(time.Millisecond * 200)
 			continue
 		} else {
-			jb.currentjobs++
 			jb.jobactions.WithLabelValues("new_job").Add(1)
 			jobpoolFree = append(jobpoolFree, j)
 		}
@@ -222,13 +227,12 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 		}
 	}()
 
-	bookkeep := func() {
+	bookkeep := func() []*job {
 		var tmp []*job
 		for i, j := range jobpoolFree {
 			if j.useCount < 2 {
 				j.stop(true)
 				jb.jobactions.WithLabelValues("reap_idle").Add(1)
-				jb.currentjobs--
 				delete(pidRss, j.id)
 
 				procsMutex.Lock()
@@ -238,7 +242,6 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 				jb.jobactions.WithLabelValues("rss_kill").Add(1)
 
 				j.stop(true)
-				jb.currentjobs--
 				delete(pidRss, j.id)
 
 				procsMutex.Lock()
@@ -251,158 +254,124 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 			}
 			jobpoolFree[i] = nil
 		}
-		jobpoolFree = tmp
-
 		now := time.Now()
+		var timeoutJobs []*job
 		for _, j := range jobmapReserved {
-			if now.After(j.start.Add(jb.jobTimeout)) && jb.currentjobs > 0 {
+			if now.After(j.start.Add(jb.jobTimeout)) {
+				timeoutJobs = append(timeoutJobs, j)
 
-				jb.jobactions.WithLabelValues("job_timeout").Add(1)
-				j.stop(true)
-				delete(jobmapReserved, j.id)
-				jb.currentjobs--
-				delete(pidRss, j.id)
-				procsMutex.Lock()
-				delete(cmdMap, j.id)
-				procsMutex.Unlock()
 			}
 		}
-
-	}
-	getjob := func() (*job, error) {
-		var jsub *job
-		if len(jobpoolFree) < 1 {
-			if jb.currentjobs >= jb.maxjobs {
-				t := time.NewTicker(time.Millisecond * 20)
-				defer t.Stop()
-				jb.jobactions.WithLabelValues("wait_maxjobs").Add(1)
-				for {
-					select {
-					case jsub = <-jb.releaseC:
-						delete(jobmapReserved, jsub.id)
-						if jsub.running {
-							return jsub, nil
-						}
-
-						jb.jobactions.WithLabelValues("died").Add(1)
-						delete(pidRss, jsub.id)
-						procsMutex.Lock()
-						delete(cmdMap, jsub.id)
-						procsMutex.Unlock()
-
-					case <-t.C:
-						bookkeep()
-					}
-				}
-
-			}
-			if jsub, err = newjob(jobID, jb.runner, jb.runTimer); err != nil {
-				jb.jobactions.WithLabelValues("job_create_err").Add(1)
-				jobID++
-				return nil, err
-			}
-			jobID++
-
-			jb.jobactions.WithLabelValues("new_job").Add(1)
-			pidRss[jsub.id] = 0
-			jb.currentjobs++
+		for _, j := range timeoutJobs {
+			jb.jobactions.WithLabelValues("job_timeout").Add(1)
+			j.stop(true)
+			delete(jobmapReserved, j.id)
+			delete(pidRss, j.id)
 			procsMutex.Lock()
-			cmdMap[jsub.id] = jsub
+			delete(cmdMap, j.id)
 			procsMutex.Unlock()
-			return jsub, nil
-
 		}
-		// pop
-		jsub = jobpoolFree[len(jobpoolFree)-1]
-		jobpoolFree[len(jobpoolFree)-1] = nil
-		jobpoolFree = jobpoolFree[:len(jobpoolFree)-1]
-		return jsub, nil
+		return tmp
 
 	}
 
-	var allocJ, retJ *job
-	if allocJ, err = getjob(); err != nil {
-		panic(err)
+	releaseJob := func(j *job) *job {
+		delete(jobmapReserved, j.id)
+		if j.Recycle {
+			jb.jobactions.WithLabelValues("recycle").Add(1)
+		} else if pidRss[j.id] > jb.maxrss {
+			j.Recycle = true
+			jb.jobactions.WithLabelValues("rss_kill").Add(1)
+
+		} else if !j.running {
+			j.Recycle = true
+			jb.jobactions.WithLabelValues("died").Add(1)
+		}
+
+		if j.Recycle {
+			j.stop(true)
+			delete(pidRss, j.id)
+			procsMutex.Lock()
+			delete(cmdMap, j.id)
+			procsMutex.Unlock()
+			return nil
+
+		}
+		return j
 	}
 
 	jb.initWg.Done()
 	bookkeepC := time.Tick(bookinterval)
 	for running {
+		if len(jobpoolFree) == 0 {
+			if currentjobs() >= jb.maxjobs {
+				jb.jobactions.WithLabelValues("wait_maxjobs").Add(1)
+				select {
+				case j := <-jb.releaseC:
+					if j = releaseJob(j); j != nil {
+						jobpoolFree = append(jobpoolFree, j)
+					}
+				case <-bookkeepC:
+					jobpoolFree = bookkeep()
 
-		if _, ok := jobmapReserved[allocJ.id]; ok {
-			if allocJ, err = getjob(); err != nil {
-				jb.logger([]byte(err.Error()))
-				time.Sleep(time.Millisecond * 200)
+				}
 				continue
+
+			} else if jsub, err := newjob(jobID, jb.runner, jb.runTimer); err != nil {
+				jb.jobactions.WithLabelValues("job_create_err").Add(1)
+				time.Sleep(time.Millisecond * 5)
+				continue
+
+			} else {
+
+				jb.jobactions.WithLabelValues("new_job").Add(1)
+				jobpoolFree = append(jobpoolFree, jsub)
+				jobID++
+
+				procsMutex.Lock()
+				cmdMap[jsub.id] = jsub
+				procsMutex.Unlock()
+
 			}
 		}
 
 		select {
 		case _, running = <-jb.runningC:
 
-			if _, ok := jobmapReserved[allocJ.id]; !ok {
-				retJ.stop(false)
-				jb.jobactions.WithLabelValues("untracked_return").Add(1)
-
-				jb.currentjobs--
-				procsMutex.Lock()
-				delete(cmdMap, retJ.id)
-				procsMutex.Unlock()
-			}
-		case retJ = <-jb.releaseC:
-			delete(jobmapReserved, retJ.id)
-			retire := false
-			if pidRss[retJ.id] > jb.maxrss {
-				retire = true
-				jb.jobactions.WithLabelValues("rss_kill").Add(1)
-
-			} else if !retJ.running {
-				jb.jobactions.WithLabelValues("died").Add(1)
-				retire = true
-			}
-
-			if retire {
-				retJ.stop(true)
-				jb.currentjobs--
-				delete(pidRss, retJ.id)
-
-				procsMutex.Lock()
-				delete(cmdMap, retJ.id)
-				procsMutex.Unlock()
-
-			} else {
-				jobpoolFree = append(jobpoolFree, retJ)
+		case j := <-jb.releaseC:
+			if j = releaseJob(j); j != nil {
+				jobpoolFree = append(jobpoolFree, j)
 			}
 
 		case pRss := <-rssResp:
 			pidRss[pRss.pid] = pRss.rss
 
-		case jb.allocC <- allocJ:
-			allocJ.start = time.Now()
-			allocJ.useCount++
-			allocJ.totCount++
-			if allocJ.totCount > 1 {
+		case jb.allocC <- jobpoolFree[len(jobpoolFree)-1]:
+			j := jobpoolFree[len(jobpoolFree)-1]
+			jobpoolFree[len(jobpoolFree)-1] = nil
+			jobpoolFree = jobpoolFree[:len(jobpoolFree)-1]
+			j.start = time.Now()
+			j.useCount++
+			j.totCount++
+			if j.totCount > 1 {
 				jb.jobactions.WithLabelValues("reuse").Add(1)
 			}
-
-			jobmapReserved[allocJ.id] = allocJ
+			jobmapReserved[j.id] = j
 
 		case <-bookkeepC:
-			bookkeep()
-			jb.runningChildren.Set(float64(jb.currentjobs))
+			jobpoolFree = bookkeep()
+			// current includes the one ready for alloc
+			jb.runningChildren.Set(float64(currentjobs()))
 		}
 
 	}
 	for _, j := range jobpoolFree {
 		j.stop(false)
-		jb.currentjobs--
 	}
-
-	for jb.currentjobs > 0 {
-		retJ = <-jb.releaseC
-
-		retJ.stop(false)
-		jb.currentjobs--
+	jobpoolFree = jobpoolFree[:0]
+	for currentjobs() > 0 {
+		j := <-jb.releaseC
+		j.stop(false)
 	}
 }
 

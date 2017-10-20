@@ -26,6 +26,7 @@ type job struct {
 	stdout             msgio.Reader
 	running            bool
 	runtime            *prometheus.HistogramVec
+	Recycle            bool
 }
 
 func (j *job) age() time.Duration {
@@ -96,6 +97,7 @@ func newjob(jobid uint64, run Runner, v *prometheus.HistogramVec) (*job, error) 
 		cmd:     run.Run(jobid),
 		id:      0,
 		runtime: v,
+		Recycle: false,
 	}
 	j.cmd.Stderr = os.Stderr
 
