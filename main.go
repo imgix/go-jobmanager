@@ -40,6 +40,19 @@ type Jobmanager struct {
 	reserveTimer    *prometheus.HistogramVec
 }
 
+func NewJobManagerWithTimeout(run Runner, namespace, subsystem, jobname string,
+	min, max int64, maxrss uint64, d time.Duration) (*Jobmanager, error) {
+	if jb, err := NewJobManager(
+		run, namespace, subsystem,
+		jobname, min, max, maxrss,
+	); err != nil {
+		return nil, err
+	} else {
+		jb.jobTimeout = d
+	}
+	return nil, nil
+
+}
 func NewJobManager(run Runner, namespace, subsystem, jobname string,
 	min, max int64, maxrss uint64) (*Jobmanager, error) {
 	if subsystem == "" {
@@ -230,7 +243,7 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 	bookkeep := func(t time.Time) []*job {
 		var tmp []*job
 		for i, j := range jobpoolFree {
-			if j.start.Add(time.Second * 10).Before(t) {
+			if j.start.Add(time.Second * 60).Before(t) {
 				j.stop(true)
 				jb.jobactions.WithLabelValues("reap_idle").Add(1)
 				delete(pidRss, j.id)
