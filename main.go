@@ -243,7 +243,7 @@ func (jb *Jobmanager) run(bookinterval time.Duration) {
 	bookkeep := func(t time.Time) []*job {
 		var tmp []*job
 		for i, j := range jobpoolFree {
-			if t.Before(j.start.Add(time.Second * 60)) {
+			if t.After(j.start.Add(time.Second * 30)) {
 				j.stop(true)
 				jb.jobactions.WithLabelValues("reap_idle").Add(1)
 				delete(pidRss, j.id)
