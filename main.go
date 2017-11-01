@@ -37,7 +37,7 @@ type Jobmanager struct {
 	jobactions      *prometheus.CounterVec
 	runningChildren prometheus.Gauge
 	runTimer        *prometheus.HistogramVec
-	reserveTimer    *prometheus.HistogramVec
+	reserveTimer    prometheus.Histogram
 }
 
 func NewJobManagerWithTimeout(run Runner, namespace, subsystem, jobname string,
@@ -98,19 +98,15 @@ func NewJobManager(run Runner, namespace, subsystem, jobname string,
 				Namespace:   namespace,
 				Subsystem:   subsystem,
 				ConstLabels: prometheus.Labels{"jobname": jobname},
-
-				//Buckets: prometheus.LinearBuckets( 0.00010, 0.001, 7,),
+				Buckets:     []float64{0.00010, 0.001, 0.01, .1, 1, 5, 10},
 
 				Help: "job manager timer",
-				Buckets: prometheus.ExponentialBuckets(
-					0.00010, 3.0, 7,
-				),
 			},
 			[]string{"phase"},
 		),
-		reserveTimer: prometheus.NewHistogramVec(
+		reserveTimer: prometheus.NewHistogram(
 			prometheus.HistogramOpts{
-				Name:        "worker_wait",
+				Name:        "worker_reserve_wait",
 				Namespace:   namespace,
 				Subsystem:   subsystem,
 				ConstLabels: prometheus.Labels{"jobname": jobname},
@@ -120,12 +116,9 @@ func NewJobManager(run Runner, namespace, subsystem, jobname string,
 					),
 				*/
 
-				Help: "job manager timer",
-				Buckets: prometheus.ExponentialBuckets(
-					0.0000003, 3.0, 7,
-				),
+				Help:    "time spent waiting for free subproc",
+				Buckets: []float64{0.000001, 0.00001, 0.001, .10, 1, 5},
 			},
-			[]string{"phase"},
 		),
 	}
 
@@ -155,7 +148,7 @@ func (jb *Jobmanager) reserve() *job {
 func (jb *Jobmanager) Reserve() *job {
 	timer := prometheus.NewTimer(
 		prometheus.ObserverFunc(func(v float64) {
-			jb.reserveTimer.WithLabelValues("reserve").Observe(v)
+			jb.reserveTimer.Observe(v)
 		},
 		),
 	)
