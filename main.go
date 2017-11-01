@@ -49,6 +49,7 @@ func NewJobManagerWithTimeout(run Runner, namespace, subsystem, jobname string,
 		return nil, err
 	} else {
 		jb.jobTimeout = d
+		return jb, nil
 	}
 	return nil, nil
 
