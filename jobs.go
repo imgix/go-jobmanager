@@ -92,11 +92,20 @@ func (j *job) communicate(b []byte) ([]byte, func(), error) {
 	return nil, nil, nil
 }
 
-func newjob(jobid uint64, run Runner, v *prometheus.HistogramVec) (*job, error) {
+func newjob(jobid uint64, run Runner, p *prometheus.HistogramVec) (*job, error) {
+
+	timer := prometheus.NewTimer(
+		prometheus.ObserverFunc(func(v float64) {
+			p.WithLabelValues("newjob").Observe(v)
+		},
+		),
+	)
+	defer timer.ObserveDuration()
+
 	j := &job{
 		cmd:     run.Run(jobid),
 		id:      0,
-		runtime: v,
+		runtime: p,
 		Recycle: false,
 	}
 	j.cmd.Stderr = os.Stderr
