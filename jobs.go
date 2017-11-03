@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
-	"time"
 
 	prefmsg "github.com/davidbirdsong/go-prefixbytes"
 	msgio "github.com/jbenet/go-msgio"
@@ -15,22 +14,17 @@ import (
 )
 
 type job struct {
-	useCount, totCount int64
-	rss                uint64
-	id                 int32
-	start              time.Time
-	cmd                *exec.Cmd
-	proc               *process.Process
-	stdin              io.Writer
-	stderr             io.ReadCloser
-	stdout             msgio.Reader
-	running            bool
-	runtime            *prometheus.HistogramVec
-	Recycle            bool
-}
-
-func (j *job) age() time.Duration {
-	return time.Now().Sub(j.start)
+	useCount uint64
+	rss      uint64
+	id       int32
+	cmd      *exec.Cmd
+	proc     *process.Process
+	stdin    io.Writer
+	stderr   io.ReadCloser
+	stdout   msgio.Reader
+	running  bool
+	runtime  prometheus.Histogram
+	Recycle  bool
 }
 
 func (j *job) stop(wait bool) {
@@ -46,7 +40,7 @@ func (j *job) Communicate(b []byte) ([]byte, func(), error) {
 	//return j.communicate(b)
 	timer := prometheus.NewTimer(
 		prometheus.ObserverFunc(func(v float64) {
-			j.runtime.WithLabelValues("call").Observe(v)
+			j.runtime.Observe(v)
 		},
 		),
 	)
@@ -92,11 +86,11 @@ func (j *job) communicate(b []byte) ([]byte, func(), error) {
 	return nil, nil, nil
 }
 
-func newjob(jobid uint64, run Runner, p *prometheus.HistogramVec) (*job, error) {
+func newjob(jobid uint64, run Runner, p prometheus.Histogram) (*job, error) {
 
 	timer := prometheus.NewTimer(
 		prometheus.ObserverFunc(func(v float64) {
-			p.WithLabelValues("newjob").Observe(v)
+			p.Observe(v)
 		},
 		),
 	)

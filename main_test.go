@@ -1,8 +1,6 @@
 package jobmanager
 
 import (
-	"fmt"
-	"io"
 	"net/http"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jolestar/go-commons-pool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	io_prometheus_client "github.com/prometheus/client_model/go"
@@ -46,7 +45,7 @@ func counterToFloat(counter *prometheus.CounterVec, l prometheus.Labels) (float6
 var bookeepIntervalMs = time.Millisecond * 500
 
 func basicSetup(t *testing.T, bin string, args []string,
-	min, max int64, maxrss uint64) *Jobmanager {
+	min, max int, maxrss uint64) *Jobmanager {
 
 	if !filepath.IsAbs(bin) {
 		var err error
@@ -55,7 +54,7 @@ func basicSetup(t *testing.T, bin string, args []string,
 		}
 	}
 
-	jb, err := NewJobManager(
+	return NewJobmanager(
 		&cmdTester{
 			path: bin,
 			args: args,
@@ -67,18 +66,10 @@ func basicSetup(t *testing.T, bin string, args []string,
 		min, max, // 1 min proc, 10 maxprocs
 		maxrss, //52 MB
 	)
-	if err != nil {
-		t.Fatal(err)
-		return jb
-
-	}
-
-	jb.Run(bookeepIntervalMs)
-	return jb
 }
 
 func leveeSetup(t *testing.T, script string, args []string,
-	min, max int64, maxrss uint64) *Jobmanager {
+	min, max int, maxrss uint64) *Jobmanager {
 	if levee, err := exec.LookPath("levee"); err != nil {
 		t.Fatal(err)
 	} else {
@@ -93,44 +84,44 @@ func leveeSetup(t *testing.T, script string, args []string,
 
 }
 func TestEofJob(t *testing.T) {
-	min, max := int64(2), int64(10)
+	min, max := 2, 10
 	maxrss := uint64(1024 * 1024 * 10)
 	jb := leveeSetup(t, "simplespin.lua", []string{},
 		min, max, maxrss)
 
-	j := jb.Reserve()
+	j, err := jb.Reserve()
+	if err != nil {
+		t.Fatal(err)
+	}
 	syscall.Kill(j.cmd.Process.Pid, syscall.SIGKILL)
 
 	j.Communicate([]byte("DKFJDKJF"))
 	jb.Release(j)
 	jb.Stop()
 
-	if f, err := counterToFloat(jb.jobactions,
-		prometheus.Labels{"action": "died"}); err != nil {
-		t.Fatal(err)
-	} else if f != 1 {
-		t.Errorf("expected 1 jobs post-init, got: %f\n", f)
-	}
-
 }
 
 func TestMinMaxJob(t *testing.T) {
-	min, max := int64(2), int64(10)
+	min, max := 2, 10
 	maxrss := uint64(1024 * 1024 * 10)
 	jb := leveeSetup(t, "simplespin.lua", []string{},
 		min, max, maxrss)
 
 	jlist := make([]*job, 0)
 
-	if f, err := counterToFloat(jb.jobactions,
-		prometheus.Labels{"action": "new_job"}); err != nil {
-		t.Fatal(err)
-	} else if f != 2 {
-		t.Errorf("expected 2 jobs post-init, got: %f\n", f)
-	}
+	for i := max + 1; i > 0; i-- {
+		if j, e := jb.Reserve(); e != nil {
+			if i == 1 {
+				if err, ok := e.(*pool.NoSuchElementErr); !ok {
+					t.Logf("didn't catch error: %#v", err)
+				}
+			} else {
+				t.Fatalf("%d %#v", i, e)
+			}
+		} else {
+			jlist = append(jlist, j)
 
-	for i := max; i > 0; i-- {
-		jlist = append(jlist, jb.Reserve())
+		}
 	}
 
 	j := jlist[len(jlist)-1]
@@ -140,15 +131,6 @@ func TestMinMaxJob(t *testing.T) {
 		jb.Release(jh)
 
 	}(j)
-	j = jb.Reserve()
-	jb.Release(j)
-
-	if f, err := counterToFloat(jb.jobactions,
-		prometheus.Labels{"action": "wait_maxjobs"}); err != nil {
-		t.Fatal(err)
-	} else if f != 2 {
-		t.Errorf("expected 1 wait_maxjobs, got: %f\n", f)
-	}
 
 	for _, j := range jlist {
 		jb.Release(j)
@@ -156,58 +138,12 @@ func TestMinMaxJob(t *testing.T) {
 
 }
 
-func TestKillSlowJob(t *testing.T) {
-	bin, err := exec.LookPath("levee")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bookeepinterval_ms := time.Duration(500)
-
-	jb, err := NewJobManager(
-		&cmdTester{
-			path: bin,
-			args: []string{
-				bin,
-				"run",
-				"slow.lua",
-				fmt.Sprintf("%d", bookeepinterval_ms),
-			},
-			dir: "testdata",
-		},
-		"test",
-		"",
-		"levee_test",
-		1, 1, // 1 min proc, 10 maxprocs
-		1024*1024*600, //52 MB
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	jb.Run(time.Millisecond * bookeepinterval_ms)
-	j := jb.Reserve()
-	if j == nil {
-		t.Fatalf("job manager returned nil job")
-	}
-
-	if _, _, err := j.Communicate([]byte("comms!!!!\n")); err != io.EOF {
-		t.Fatalf("job should have timed out, caused error: %v", err)
-	}
-	time.Sleep(3 * time.Second)
-	if f, err := counterToFloat(jb.jobactions,
-		prometheus.Labels{"action": "job_timeout"}); err != nil {
-		t.Fatal(err)
-	} else if f < 1 {
-		t.Errorf("expected timeout job counter ticked up")
-	}
-}
-
 func TestRSSKill(t *testing.T) {
 	bin, err := exec.LookPath("levee")
 	if err != nil {
 		t.Fatal(err)
 	}
-	jb, err := NewJobManager(
+	jb := NewJobmanager(
 		&cmdTester{
 			path: bin,
 			args: []string{
@@ -223,9 +159,6 @@ func TestRSSKill(t *testing.T) {
 		30, 40, // 1 min proc, 10 maxprocs
 		1024*1024*6, //52 MB
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if jb == nil {
 		t.Fatal("no job manager")
 	}
@@ -236,8 +169,6 @@ func TestRSSKill(t *testing.T) {
 	http.Handle("/metrics", promhttp.Handler())
 	go http.ListenAndServe(":8080", nil)
 
-	jb.Run(time.Second * 3)
-
 	workC := make(chan int)
 	wg := &sync.WaitGroup{}
 	for i := 1; i <= 30; i++ {
@@ -245,7 +176,10 @@ func TestRSSKill(t *testing.T) {
 		go func() {
 			for range workC {
 				//fmt.Printf("[TEST] loop count: %d\n", i)
-				j := jb.Reserve()
+				j, e := jb.Reserve()
+				if e != nil {
+					t.Fatal(e)
+				}
 				if j == nil {
 				}
 
