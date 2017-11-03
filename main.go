@@ -58,6 +58,15 @@ func NewJobmanager(run Runner, namespace, subsystem, jobname string,
 			},
 		),
 	}
+	destoryCounter := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name:        "job_destroy",
+			Namespace:   namespace,
+			Subsystem:   subsystem,
+			ConstLabels: prometheus.Labels{"jobname": jobname},
+			Help:        "job destroy counter",
+		},
+	)
 
 	pids := make(map[int32]*proc)
 	pidsL := sync.Mutex{}
@@ -129,6 +138,7 @@ func NewJobmanager(run Runner, namespace, subsystem, jobname string,
 			if j, ok := o.Object.(*job); !ok {
 				return fmt.Errorf("bad object")
 			} else {
+				destoryCounter.Inc()
 				pidsL.Lock()
 				delete(pids, j.id)
 				pidsL.Unlock()
@@ -168,9 +178,6 @@ func NewJobmanager(run Runner, namespace, subsystem, jobname string,
 	)
 	go func() {
 		for {
-			jobStates.WithLabelValues("destroyed").Set(
-				float64(jb.opool.GetDestroyedCount()),
-			)
 			jobStates.WithLabelValues("idle").Set(
 				float64(jb.opool.GetNumIdle()),
 			)
@@ -188,6 +195,7 @@ func NewJobmanager(run Runner, namespace, subsystem, jobname string,
 	jb.collectors = []prometheus.Collector{
 		runTimer,
 		jobStates,
+		destoryCounter,
 		jb.reserveTimer,
 		jb.reuseCounter,
 	}
