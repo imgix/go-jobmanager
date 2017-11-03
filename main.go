@@ -45,7 +45,8 @@ func NewJobmanager(run Runner, namespace, subsystem, jobname string,
 				Subsystem:   subsystem,
 				ConstLabels: prometheus.Labels{"jobname": jobname},
 				Help:        "time spent waiting for free subproc",
-				Buckets:     []float64{0.000001, 0.00001, 0.001, .10, 1, 5},
+				Buckets: []float64{0.00001, 0.0001, 0.001, 0.01,
+					.1, .2, .3, .5, .8, 1},
 			},
 		),
 		reuseCounter: prometheus.NewCounter(
@@ -58,14 +59,15 @@ func NewJobmanager(run Runner, namespace, subsystem, jobname string,
 			},
 		),
 	}
-	destoryCounter := prometheus.NewCounter(
+	churnCounter := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name:        "job_destroy",
+			Name:        "job_churn",
 			Namespace:   namespace,
 			Subsystem:   subsystem,
 			ConstLabels: prometheus.Labels{"jobname": jobname},
-			Help:        "job destroy counter",
+			Help:        "job churn counter",
 		},
+		[]string{"churn"},
 	)
 
 	pids := make(map[int32]*proc)
@@ -97,7 +99,7 @@ func NewJobmanager(run Runner, namespace, subsystem, jobname string,
 		TestOnReturn:       false,
 		TestWhileIdle:      false,
 		BlockWhenExhausted: true,
-		MaxWaitMillis:      200,
+		MaxWaitMillis:      800,
 
 		MinEvictableIdleTimeMillis: 90000,
 		NumTestsPerEvictionRun:     -4,
@@ -123,6 +125,8 @@ func NewJobmanager(run Runner, namespace, subsystem, jobname string,
 			if e != nil {
 				return nil, e
 			}
+
+			churnCounter.WithLabelValues("create").Inc()
 			pidsL.Lock()
 			pids[j.id] = new(proc)
 			if pids[j.id].p, e = process.NewProcess(j.id); e != nil {
@@ -138,7 +142,7 @@ func NewJobmanager(run Runner, namespace, subsystem, jobname string,
 			if j, ok := o.Object.(*job); !ok {
 				return fmt.Errorf("bad object")
 			} else {
-				destoryCounter.Inc()
+				churnCounter.WithLabelValues("destroy").Inc()
 				pidsL.Lock()
 				delete(pids, j.id)
 				pidsL.Unlock()
@@ -155,6 +159,7 @@ func NewJobmanager(run Runner, namespace, subsystem, jobname string,
 			if p, ok := pids[j.id]; !ok {
 				return true
 			} else if p.rss > maxrss {
+				churnCounter.WithLabelValues("rsskill").Inc()
 				return false
 			}
 			return true
@@ -195,7 +200,7 @@ func NewJobmanager(run Runner, namespace, subsystem, jobname string,
 	jb.collectors = []prometheus.Collector{
 		runTimer,
 		jobStates,
-		destoryCounter,
+		churnCounter,
 		jb.reserveTimer,
 		jb.reuseCounter,
 	}
