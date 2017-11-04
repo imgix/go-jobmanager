@@ -92,7 +92,7 @@ func NewJobmanager(run Runner, namespace, subsystem, jobname string,
 	cfg := pool.ObjectPoolConfig{
 		Lifo:               true,
 		MaxTotal:           max,
-		MaxIdle:            min + min/2,
+		MaxIdle:            min * 4,
 		MinIdle:            min,
 		TestOnCreate:       true,
 		TestOnBorrow:       false,
